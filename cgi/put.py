@@ -10,10 +10,13 @@ if method is None or method.lower() != 'put':
   status='error'
 
 else:
-  path = os.environ.get('PATH_INFO').split('/').pop()
+  path = os.environ.get('PATH_INFO').strip("/")
+  sys.stderr.write("PUT path-info: '%s'\n" % path)
   status = 'exists'
 
   filepath = os.path.join(BASE_PATH, path)
+  sys.stderr.write("Writing file: '%s'\nBase-Path: '%s'\n" % (filepath, BASE_PATH))
+
   filedir = os.path.dirname(filepath)
   if not os.path.exists(filedir):
     os.makedirs(filedir)
