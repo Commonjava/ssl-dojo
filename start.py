@@ -21,24 +21,31 @@ from optparse import (OptionParser,BadOptionError,AmbiguousOptionError)
 import socket
 import fcntl
 import struct
+import time
 
 OUT_DIR='/var/www/html/ssl-config'
 OSSL_DIR=os.path.join(OUT_DIR, 'openssl-files')
-
-SELF_SIGN_CRT_TYPE='crt'
-CA_SIGN_CRT_TYPE='csr'
 
 CA_ROOT_KEYTYPE='root'
 CA_WEB_KEYTYPE='web'
 
 KEY_FORMAT="openssl genrsa -des3 -passout 'pass:test' -out {dir}/{keytype}.key 2048"
-CA_ROOT_SIGN_FORMAT="openssl req -config {openssl_cnf} -new -x509 -passin 'pass:test' -days 3650 -key {dir}/root.key -out {dir}/root.crt -subj '/C=US/ST=Kansas/L=Smallville/O=Test/CN=Root/emailAddress=it@{host}'"
 
-CA_WEB_CSR_FORMAT="openssl req -config {openssl_cnf} -new -passin 'pass:test' -days 1095 -key {dir}/web.key -out {dir}/web.csr -subj '/C=US/ST=Kansas/L=Smallville/O=Test/OU=Web/CN=Web Admin/emailAddress=webadmin@{host}'"
+CA_ROOT_SIGN_FORMAT=("openssl req -config {openssl_cnf} -new -x509 -passin 'pass:test' -days 3650 -key {dir}/root.key -out {dir}/root.crt"
+					 " -subj '/C=US/ST=Kansas/L=Smallville/O=Test/CN=Root/emailAddress=it@{host}'")
+
+CA_WEB_CSR_FORMAT=("openssl req -config {openssl_cnf} -new -passin 'pass:test' -days 1095 -key {dir}/web.key -out {dir}/web.csr"
+				   " -subj '/C=US/ST=Kansas/L=Smallville/O=Test/OU=Web/CN=Web Admin/emailAddress=webadmin@{host}'")
+
 CA_WEB_SIGN_FORMAT="openssl ca -config {openssl_cnf} -passin 'pass:test' -batch -name CA_root -extensions v3_ca -out {dir}/web.crt -infiles {dir}/web.csr"
 
-SITE_CRT_FORMAT="openssl req -config {openssl_cnf} -nodes -newkey rsa:2048 -keyout {dir}/site.key -out {dir}/site.{cert_type} -days 365 -subj '/C=US/ST=Kansas/L=Smallville/O=Test/OU=Web/CN={host}/emailAddress=webadmin@{host}/subjectAltName=IP={ip_address}'"
+SITE_CRT_FORMAT=("openssl req -config {openssl_cnf} -nodes -newkey rsa:2048 -keyout {dir}/site.key -out {dir}/site.csr -days 365"
+				 " -subj '/C=US/ST=Kansas/L=Smallville/O=Test/OU=Web/CN={host}/emailAddress=webadmin@{host}/subjectAltName=IP={ip_address}'")
+
 SITE_SIGN_FORMAT="openssl ca -config {openssl_cnf} -passin 'pass:test' -batch -name CA_{keytype} -out {dir}/site.crt -infiles {dir}/site.csr"
+
+SITE_SELFSIGN_FORMAT=("openssl req -config {openssl_cnf} -nodes -x509 -newkey rsa:2048 -keyout {dir}/site.key -out {dir}/site.crt -days 365"
+					  " -subj '/C=US/ST=Kansas/L=Smallville/O=Test/OU=Web/CN={host}/emailAddress=webadmin@{host}/subjectAltName=IP={ip_address}'")
 
 
 CA_TYPE_ENVAR='CA_TYPE'
@@ -96,9 +103,11 @@ create_conf(HTTPD_CONF, host)
 create_conf(SSL_CONF, host)
 
 for d in ('certs', 'crl', 'newcerts', 'private'):
-	os.makedirs(os.path.join(OSSL_DIR, d))
+	path = os.path.join(OSSL_DIR, d)
+	if os.path.exists(path) is not True:
+		os.makedirs(path)
 
-init_contents = {'index.txt': '', 'serial': '100001'}
+init_contents = {'index.txt': '', 'serial': str((int)(time.time()))}
 for filename in init_contents:
 	with open(os.path.join(OSSL_DIR, filename), 'w') as f:
 		f.write(init_contents[filename])
@@ -122,11 +131,11 @@ if flavor is not None:
 
 		key=CA_WEB_KEYTYPE
 
-	run(SITE_CRT_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, cert_type=CA_SIGN_CRT_TYPE))
+	run(SITE_CRT_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
 	run(SITE_SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=key))
 
 else:
 	# Generate a self-signed certificate without a CA
-	run(SITE_CRT_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, cert_type=SELF_SIGN_CRT_TYPE))
+	run(SITE_SELFSIGN_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
 
 run("httpd -D FOREGROUND")
