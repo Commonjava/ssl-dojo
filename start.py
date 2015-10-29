@@ -131,11 +131,15 @@ if flavor is not None:
 
 		key=CA_WEB_KEYTYPE
 
+	print "Generate site certificate"
 	run(SITE_CRT_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
+	
+	print "Sign site certificate with CA: %s" % key
 	run(SITE_SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=key))
 
 else:
 	# Generate a self-signed certificate without a CA
+	print "Generate self-signed certificate"
 	run(SITE_SELFSIGN_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
 
 run("httpd -D FOREGROUND")
