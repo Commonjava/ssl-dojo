@@ -28,12 +28,16 @@ By default, the host is set to `test.myco.com`. If you want to change it, specif
 
 The image also exposes ports 80 and 443 for mapping.
 
-## Pushing test content
+## Managing test content
 
 To push content up to the server for testing, you might use something that approximates the following command:
 
-    $ curl -i -X PUT --data-binary @myfile.txt http://172.17.0.1/cgi-bin/put.py/myfile.txt
+    $ curl -i -X PUT --data-binary @myfile.txt http://172.17.0.1/cgi-bin/content.py/myfile.txt
 
 Then, you should be able to retrieve the content again using either http or https:
 
     $ curl -i http://172.17.0.1/myfile.txt
+
+To remove content, issue a DELETE command like the following:
+
+    $ curl -X DELETE http://172.17.0.1/cgi-bin/content.py/myfile.txt
