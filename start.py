@@ -26,26 +26,34 @@ import time
 OUT_DIR='/var/www/html/ssl-config'
 OSSL_DIR=os.path.join(OUT_DIR, 'openssl-files')
 
+EXT_CA="-extensions v3_ca"
+EXT_NONE=""
+
 CA_ROOT_KEYTYPE='root'
 CA_WEB_KEYTYPE='web'
+CA_SITE_KEYTYPE='site'
+CA_CLIENT_KEYTYPE='client'
+
+ROOT_SUBJECT="-subj '/C=US/ST=Kansas/L=Smallville/O=Test/CN=Root/emailAddress=it@{host}'"
+WEB_SUBJECT="-subj '/C=US/ST=Kansas/L=Smallville/O=Test/OU=Web/CN=Web Admin/emailAddress=webadmin@{host}'"
+SITE_SUBJECT="-subj '/C=US/ST=Kansas/L=Smallville/O=Test/OU=Web/CN={host}/emailAddress=siteadmin@{host}'"
+CLIENT_SUBJECT="-subj '/C=US/ST=Kansas/L=Smallville/O=Test/OU=Clients/CN=client/emailAddress=client@{host}'"
+
+SITE_SAN = "IP.1:{ip_address},DNS.1:localhost,DNS.2:{ip_address}"
 
 KEY_FORMAT="openssl genrsa -des3 -passout 'pass:test' -out {dir}/{keytype}.key 2048"
 
-CA_ROOT_SIGN_FORMAT=("openssl req -config {openssl_cnf} -new -x509 -passin 'pass:test' -days 3650 -key {dir}/root.key -out {dir}/root.crt"
-					 " -subj '/C=US/ST=Kansas/L=Smallville/O=Test/CN=Root/emailAddress=it@{host}'")
+CA_ROOT_SIGN_FORMAT=   "openssl req -config {openssl_cnf} -passin 'pass:test'  -new             -days 3650   -key {dir}/root.key      -out {dir}/root.crt %s -x509" % ROOT_SUBJECT
+CSR_FORMAT=            "openssl req -config {openssl_cnf} -passin 'pass:test'  -new             -days {days} -key {dir}/{keytype}.key -out {dir}/{keytype}.csr {subject}"
+SITE_CSR_FORMAT=       "openssl req -config {openssl_cnf} -nodes               -newkey rsa:2048 -days 365    -keyout {dir}/site.key   -out {dir}/site.csr %s" % SITE_SUBJECT
+CLIENT_SELFSIGN_FORMAT="openssl req -config {openssl_cnf} -passout 'pass:test' -newkey rsa:2048 -days 365    -keyout {dir}/client.key -out {dir}/client.crt %s -x509" % CLIENT_SUBJECT
+SITE_SELFSIGN_FORMAT=  "openssl req -config {openssl_cnf} -nodes               -newkey rsa:2048 -days 365    -keyout {dir}/site.key   -out {dir}/site.crt   %s -x509" % SITE_SUBJECT
 
-CA_WEB_CSR_FORMAT=("openssl req -config {openssl_cnf} -new -passin 'pass:test' -days 1095 -key {dir}/web.key -out {dir}/web.csr"
-				   " -subj '/C=US/ST=Kansas/L=Smallville/O=Test/OU=Web/CN=Web Admin/emailAddress=webadmin@{host}'")
 
-CA_WEB_SIGN_FORMAT="openssl ca -config {openssl_cnf} -passin 'pass:test' -batch -name CA_root -extensions v3_ca -out {dir}/web.crt -infiles {dir}/web.csr"
+SIGN_FORMAT="openssl ca -config {openssl_cnf} -passin 'pass:test' -batch -name CA_{catype} {ext} -out {dir}/{keytype}.crt -infiles {dir}/{keytype}.csr"
 
-SITE_CRT_FORMAT=("openssl req -config {openssl_cnf} -nodes -newkey rsa:2048 -keyout {dir}/site.key -out {dir}/site.csr -days 365"
-				 " -subj '/C=US/ST=Kansas/L=Smallville/O=Test/OU=Web/CN={host}/emailAddress=webadmin@{host}/subjectAltName=IP={ip_address}'")
-
-SITE_SIGN_FORMAT="openssl ca -config {openssl_cnf} -passin 'pass:test' -batch -name CA_{keytype} -out {dir}/site.crt -infiles {dir}/site.csr"
-
-SITE_SELFSIGN_FORMAT=("openssl req -config {openssl_cnf} -nodes -x509 -newkey rsa:2048 -keyout {dir}/site.key -out {dir}/site.crt -days 365"
-					  " -subj '/C=US/ST=Kansas/L=Smallville/O=Test/OU=Web/CN={host}/emailAddress=webadmin@{host}/subjectAltName=IP={ip_address}'")
+P12_FORMAT="openssl pkcs12 -export -clcerts -passin 'pass:test' -passout 'pass:test' -in {dir}/{keytype}.crt -inkey {dir}/{keytype}.key -out {dir}/{keytype}.p12"
+PEM_FORMAT="openssl pkcs12         -clcerts -passin 'pass:test' -passout 'pass:test' -in {dir}/{keytype}.p12                            -out {dir}/{keytype}.pem"
 
 
 CA_TYPE_ENVAR='CA_TYPE'
@@ -57,11 +65,13 @@ OPENSSL_CONF=os.path.join(OSSL_DIR, 'openssl.cnf')
 HTTPD_CONF='/etc/httpd/conf/httpd.conf'
 SSL_CONF='/etc/httpd/conf.d/ssl.conf'
 
-def create_conf(conf_file, host):
+def create_conf(conf_file, host, subjectAltNames=None):
 	infile = "%s.in" % conf_file
 	if os.path.exists(infile):
 		with open(infile, 'r') as fi:
 			output = fi.read().replace('{{host}}', host).replace('{{dir}}', OUT_DIR).replace('{{openssl_dir}}', OSSL_DIR)
+			if subjectAltNames is not None:
+				output = output.replace('{{subjectAltNames}}', subjectAltNames)
 			with open(conf_file, 'w') as fo:
 				fo.write(output)
 	else:
@@ -98,7 +108,7 @@ if flavor != 'single' and flavor != 'multi':
 ip_address=get_ip_address()
 host=os.environ.get(HOST_ENVAR) or ip_address
 
-create_conf(OPENSSL_CONF, host)
+create_conf(OPENSSL_CONF, host, SITE_SAN.format(ip_address=ip_address))
 create_conf(HTTPD_CONF, host)
 create_conf(SSL_CONF, host)
 
@@ -126,20 +136,32 @@ if flavor is not None:
 		# Set intermediate CA as the signing entity
 		print "Generate multi-layer CA"
 		run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_WEB_KEYTYPE, openssl_cnf=OPENSSL_CONF ))
-		run(CA_WEB_CSR_FORMAT.format(host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
-		run(CA_WEB_SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF ))
+		run(CSR_FORMAT.format(days=1000,host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_WEB_KEYTYPE, subject=WEB_SUBJECT.format(host=host)))
+		run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=CA_ROOT_KEYTYPE,keytype=CA_WEB_KEYTYPE,ext=EXT_CA))
 
 		key=CA_WEB_KEYTYPE
 
 	print "Generate site certificate"
-	run(SITE_CRT_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
+	run(SITE_CSR_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
 	
 	print "Sign site certificate with CA: %s" % key
-	run(SITE_SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=key))
+	run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_SITE_KEYTYPE,ext=EXT_NONE))
+
+	print "Generate client key/certificate"
+	run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_CLIENT_KEYTYPE, openssl_cnf=OPENSSL_CONF ))
+	run(CSR_FORMAT.format(days=365,host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_CLIENT_KEYTYPE, subject=CLIENT_SUBJECT.format(host=host)))
+	run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_CLIENT_KEYTYPE,ext=EXT_NONE))
+	run(P12_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
+	run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
 
 else:
 	# Generate a self-signed certificate without a CA
 	print "Generate self-signed certificate"
 	run(SITE_SELFSIGN_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
+
+	print "Generate self-signed client key/certificate"
+	run(CLIENT_SELFSIGN_FORMAT.format(host=host,ip_address=ip_address,dir=OUT_DIR,openssl_cnf=OPENSSL_CONF))
+	run(P12_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
+	run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
 
 run("httpd -D FOREGROUND")
