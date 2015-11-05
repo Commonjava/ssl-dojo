@@ -159,9 +159,10 @@ else:
 	print "Generate self-signed certificate"
 	run(SITE_SELFSIGN_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
 
-	print "Generate self-signed client key/certificate"
-	run(CLIENT_SELFSIGN_FORMAT.format(host=host,ip_address=ip_address,dir=OUT_DIR,openssl_cnf=OPENSSL_CONF))
-	run(P12_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
-	run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
+	#### This seems like it won't work without a lot of hacks on the server side, so let's just disable it for now.
+	# print "Generate self-signed client key/certificate"
+	# run(CLIENT_SELFSIGN_FORMAT.format(host=host,ip_address=ip_address,dir=OUT_DIR,openssl_cnf=OPENSSL_CONF))
+	# run(P12_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
+	# run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
 
 run("httpd -D FOREGROUND")
