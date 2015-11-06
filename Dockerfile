@@ -18,9 +18,10 @@ ADD config/httpd.conf /etc/httpd/conf/httpd.conf.in
 ADD config/ssl.conf /etc/httpd/conf.d/ssl.conf.in
 
 ADD cgi/*.py /var/www/cgi-bin/
+RUN chmod o+rx /var/log /var/log/httpd
 RUN chmod +x /var/www/cgi-bin/*.py
 RUN chmod o+rwx /var/www/html
-RUN mkdir -p /var/www/html/private
+RUN mkdir -p /var/www/html/private /var/www/html/logs
 RUN chmod o+rwx /var/www/html/private
 
 ADD start.py /usr/local/bin/start.py
