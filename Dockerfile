@@ -26,5 +26,5 @@ RUN chmod o+rwx /var/www/html/private
 ADD start.py /usr/local/bin/start.py
 RUN chmod +x /usr/local/bin/start.py
 
-CMD /bin/bash
-#ENTRYPOINT /usr/local/bin/start.py
+#CMD /bin/bash
+ENTRYPOINT /usr/local/bin/start.py

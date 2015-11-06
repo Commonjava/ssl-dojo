@@ -196,6 +196,7 @@ if flavor is not None:
 	run(CA_ROOT_SIGN_FORMAT.format(host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF ))
 
 	key=CA_ROOT_KEYTYPE
+	cas = [key]
 
   	if flavor == 'multi':
 		# Generate the intermediate CA, signed by root CA
@@ -207,6 +208,7 @@ if flavor is not None:
 		cat_keycert(CA_WEB_KEYTYPE)
 
 		key=CA_WEB_KEYTYPE
+		cas.append(key)
 
 	print "Generate site certificate"
 	run(SITE_CSR_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
@@ -222,10 +224,19 @@ if flavor is not None:
 	run(P12_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_CLIENT_KEYTYPE))
 	# run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
 
+	with open(os.path.join(OUT_DIR, 'ca-chain.crt'), 'w') as outfile:
+		for ca in reversed(cas):
+			with open(os.path.join(OUT_DIR, "%s.crt" % ca), 'r') as infile:
+				outfile.write(infile.read())
+
 else:
 	# Generate a self-signed certificate without a CA
 	print "Generate self-signed certificate"
 	run(SITE_SELFSIGN_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
+
+	with open(os.path.join(OUT_DIR, 'ca-chain.crt'), 'w') as outfile:
+		with open(os.path.join(OUT_DIR, 'site.crt'), 'r') as infile:
+			outfile.write(infile.read())
 
 	#### This seems like it won't work without a lot of hacks on the server side, so let's just disable it for now.
 	# print "Generate self-signed client key/certificate"
