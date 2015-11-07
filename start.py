@@ -29,6 +29,8 @@ OSSL_DIR=os.path.join(OUT_DIR, 'openssl-files')
 EXT_CA="-extensions v3_ca"
 EXT_NONE=""
 
+KEY_SIZE="2048"
+
 CA_ROOT_KEYTYPE='root'
 CA_WEB_KEYTYPE='web'
 CA_SITE_KEYTYPE='site'
@@ -44,7 +46,7 @@ SITE_SAN = "IP.1:{ip_address},DNS.1:localhost,DNS.2:{ip_address}"
 
 KEY_FORMAT=            ("openssl genrsa "
 						"-passout 'pass:test' "
-						"-out {dir}/{keytype}.key 2048")
+						"-out {dir}/{keytype}.key {keysize}")
 
 CA_ROOT_SIGN_FORMAT=   ("openssl req -config {openssl_cnf} "
 						"-passin 'pass:test' "
@@ -66,23 +68,23 @@ CSR_FORMAT=            ("openssl req -config {openssl_cnf} "
 
 SITE_CSR_FORMAT=       ("openssl req -config {openssl_cnf} "
 						"-nodes "
-						"-newkey rsa:2048 "
+						"-newkey rsa:{keysize} "
 						"-days 365 "
 						"-keyout {dir}/site.key "
 						"-out {dir}/site.csr "
 						"%s" % SITE_SUBJECT)
 
-CLIENT_SELFSIGN_FORMAT=("openssl req -config {openssl_cnf} "
-						"-passout 'pass:test' "
-						"-newkey rsa:2048 "
-						"-days 365 "
-						"-keyout {dir}/client.key "
-						"-out {dir}/client.crt "
-						"%s -x509" % CLIENT_SUBJECT)
+# CLIENT_SELFSIGN_FORMAT=("openssl req -config {openssl_cnf} "
+# 						"-passout 'pass:test' "
+# 						"-newkey rsa:{keysize} "
+# 						"-days 365 "
+# 						"-keyout {dir}/client.key "
+# 						"-out {dir}/client.crt "
+# 						"%s -x509" % CLIENT_SUBJECT)
 
 SITE_SELFSIGN_FORMAT=  ("openssl req -config {openssl_cnf} "
 						"-nodes "
-						"-newkey rsa:2048 "
+						"-newkey rsa:{keysize} "
 						"-days 365 "
 						"-keyout {dir}/site.key "
 						"-out {dir}/site.crt "
@@ -107,12 +109,12 @@ P12_FORMAT=            ("openssl pkcs12 "
 						"-inkey {dir}/{keytype}.key "
 						"-out {dir}/{keytype}.p12")
 
-# PEM_FORMAT=            ("openssl pkcs12 "
-# 						"-clcerts "
-# 						"-passin 'pass:test' "
-# 						"-passout 'pass:test' "
-# 						"-in {dir}/{keytype}.p12 "
-# 						"-out {dir}/{keytype}.pem")
+PEM_FORMAT=            ("openssl pkcs12 "
+						"-clcerts "
+						"-passin 'pass:test' "
+						"-passout 'pass:test' "
+						"-in {dir}/{keytype}.p12 "
+						"-out {dir}/{keytype}.pem")
 
 
 CA_TYPE_ENVAR='CA_TYPE'
@@ -135,7 +137,7 @@ def create_conf(conf_file, host, subjectAltNames=None):
 	infile = "%s.in" % conf_file
 	if os.path.exists(infile):
 		with open(infile, 'r') as fi:
-			output = fi.read().replace('{{host}}', host).replace('{{dir}}', OUT_DIR).replace('{{openssl_dir}}', OSSL_DIR)
+			output = fi.read().replace('{{host}}', host).replace('{{dir}}', OUT_DIR).replace('{{openssl_dir}}', OSSL_DIR).replace('{{keysize}}', KEY_SIZE)
 			if subjectAltNames is not None:
 				output = output.replace('{{subjectAltNames}}', subjectAltNames)
 			with open(conf_file, 'w') as fo:
@@ -192,7 +194,7 @@ if flavor is not None:
   	# Generate the root CA
   	# Set the root CA as the signing entity
 	print "Generate root CA"
-	run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_ROOT_KEYTYPE))
+	run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_ROOT_KEYTYPE,keysize=KEY_SIZE))
 	run(CA_ROOT_SIGN_FORMAT.format(host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF ))
 
 	key=CA_ROOT_KEYTYPE
@@ -202,7 +204,7 @@ if flavor is not None:
 		# Generate the intermediate CA, signed by root CA
 		# Set intermediate CA as the signing entity
 		print "Generate multi-layer CA"
-		run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_WEB_KEYTYPE, openssl_cnf=OPENSSL_CONF ))
+		run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_WEB_KEYTYPE, keysize=KEY_SIZE, openssl_cnf=OPENSSL_CONF ))
 		run(CSR_FORMAT.format(days=1000,host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_WEB_KEYTYPE, subject=WEB_SUBJECT.format(host=host)))
 		run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=CA_ROOT_KEYTYPE,keytype=CA_WEB_KEYTYPE,ext=EXT_CA))
 		cat_keycert(CA_WEB_KEYTYPE)
@@ -211,18 +213,18 @@ if flavor is not None:
 		cas.append(key)
 
 	print "Generate site certificate"
-	run(SITE_CSR_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
+	run(SITE_CSR_FORMAT.format(host=host, ip_address=ip_address,keysize=KEY_SIZE, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
 	
 	print "Sign site certificate with CA: %s" % key
 	run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_SITE_KEYTYPE,ext=EXT_NONE))
 
 	print "Generate client key/certificate"
-	run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_CLIENT_KEYTYPE, openssl_cnf=OPENSSL_CONF ))
+	run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_CLIENT_KEYTYPE, keysize=KEY_SIZE, openssl_cnf=OPENSSL_CONF ))
 	run(CSR_FORMAT.format(days=365,host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_CLIENT_KEYTYPE, subject=CLIENT_SUBJECT.format(host=host)))
 	run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_CLIENT_KEYTYPE,ext=EXT_NONE))
-	cat_keycert(CA_CLIENT_KEYTYPE)
+	# cat_keycert(CA_CLIENT_KEYTYPE)
 	run(P12_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_CLIENT_KEYTYPE))
-	# run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
+	run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
 
 	with open(os.path.join(OUT_DIR, 'ca-chain.crt'), 'w') as outfile:
 		for ca in reversed(cas):
@@ -232,7 +234,7 @@ if flavor is not None:
 else:
 	# Generate a self-signed certificate without a CA
 	print "Generate self-signed certificate"
-	run(SITE_SELFSIGN_FORMAT.format(host=host, ip_address=ip_address, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
+	run(SITE_SELFSIGN_FORMAT.format(host=host, ip_address=ip_address,keysize=KEY_SIZE, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
 
 	with open(os.path.join(OUT_DIR, 'ca-chain.crt'), 'w') as outfile:
 		with open(os.path.join(OUT_DIR, 'site.crt'), 'r') as infile:
