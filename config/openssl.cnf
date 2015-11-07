@@ -82,7 +82,7 @@ emailAddress		    = optional
 
 
 [ req ]
-default_bits		= 2048
+default_bits		= {{keysize}}
 default_md   		= sha256
 default_keyfile 	= privkey.pem
 distinguished_name	= req_distinguished_name
