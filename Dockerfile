@@ -11,6 +11,8 @@ ENV CA_TYPE=self CA_HOST=test.myco.com
 
 EXPOSE 80 443
 
+VOLUME /var/www/html/ssl-config
+
 ADD config/welcome.conf /etc/httpd/conf.d/welcome.conf
 
 ADD config/openssl.cnf /var/www/html/ssl-config/openssl-files/openssl.cnf.in

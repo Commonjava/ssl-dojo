@@ -166,6 +166,74 @@ def run(cmd, fail=True):
 		sys.exit(ret)
 		return ret
 
+def setup_ssl():
+	for d in ('certs', 'crl', 'newcerts', 'private'):
+		path = os.path.join(OSSL_DIR, d)
+		if os.path.exists(path) is not True:
+			os.makedirs(path)
+
+	init_contents = {'index.txt': '', 'serial': str((int)(time.time()))}
+	for filename in init_contents:
+		with open(os.path.join(OSSL_DIR, filename), 'w') as f:
+			f.write(init_contents[filename])
+
+	if flavor is not None:
+	  	# Generate the root CA
+	  	# Set the root CA as the signing entity
+		print "Generate root CA"
+		run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_ROOT_KEYTYPE,keysize=KEY_SIZE))
+		run(CA_ROOT_SIGN_FORMAT.format(host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF ))
+
+		key=CA_ROOT_KEYTYPE
+		cas = [key]
+
+	  	if flavor == 'multi':
+			# Generate the intermediate CA, signed by root CA
+			# Set intermediate CA as the signing entity
+			print "Generate multi-layer CA"
+			run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_WEB_KEYTYPE, keysize=KEY_SIZE, openssl_cnf=OPENSSL_CONF ))
+			run(CSR_FORMAT.format(days=1000,host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_WEB_KEYTYPE, subject=WEB_SUBJECT.format(host=host)))
+			run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=CA_ROOT_KEYTYPE,keytype=CA_WEB_KEYTYPE,ext=EXT_CA))
+			cat_keycert(CA_WEB_KEYTYPE)
+
+			key=CA_WEB_KEYTYPE
+			cas.append(key)
+
+		print "Generate site certificate"
+		run(SITE_CSR_FORMAT.format(host=host, ip_address=ip_address,keysize=KEY_SIZE, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
+		
+		print "Sign site certificate with CA: %s" % key
+		run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_SITE_KEYTYPE,ext=EXT_NONE))
+
+		print "Generate client key/certificate"
+		run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_CLIENT_KEYTYPE, keysize=KEY_SIZE, openssl_cnf=OPENSSL_CONF ))
+		run(CSR_FORMAT.format(days=365,host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_CLIENT_KEYTYPE, subject=CLIENT_SUBJECT.format(host=host)))
+		run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_CLIENT_KEYTYPE,ext=EXT_NONE))
+		# cat_keycert(CA_CLIENT_KEYTYPE)
+		run(P12_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_CLIENT_KEYTYPE))
+		run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
+
+		with open(os.path.join(OUT_DIR, 'ca-chain.crt'), 'w') as outfile:
+			for ca in reversed(cas):
+				with open(os.path.join(OUT_DIR, "%s.crt" % ca), 'r') as infile:
+					outfile.write(infile.read())
+
+	else:
+		# Generate a self-signed certificate without a CA
+		print "Generate self-signed certificate"
+		run(SITE_SELFSIGN_FORMAT.format(host=host, ip_address=ip_address,keysize=KEY_SIZE, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
+
+		with open(os.path.join(OUT_DIR, 'ca-chain.crt'), 'w') as outfile:
+			with open(os.path.join(OUT_DIR, 'site.crt'), 'r') as infile:
+				outfile.write(infile.read())
+
+		#### This seems like it won't work without a lot of hacks on the server side, so let's just disable it for now.
+		# print "Generate self-signed client key/certificate"
+		# run(CLIENT_SELFSIGN_FORMAT.format(host=host,ip_address=ip_address,dir=OUT_DIR,openssl_cnf=OPENSSL_CONF))
+		# run(P12_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
+		# run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
+
+
 flavor=os.environ.get(CA_TYPE_ENVAR) or None
 if flavor is not None:
 	flavor = flavor.lower()
@@ -180,70 +248,31 @@ create_conf(OPENSSL_CONF, host, SITE_SAN.format(ip_address=ip_address))
 create_conf(HTTPD_CONF, host)
 create_conf(SSL_CONF, host)
 
-for d in ('certs', 'crl', 'newcerts', 'private'):
-	path = os.path.join(OSSL_DIR, d)
-	if os.path.exists(path) is not True:
-		os.makedirs(path)
+some_exist = False
+missing = []
 
-init_contents = {'index.txt': '', 'serial': str((int)(time.time()))}
-for filename in init_contents:
-	with open(os.path.join(OSSL_DIR, filename), 'w') as f:
-		f.write(init_contents[filename])
+required_files = (os.path.join(OUT_DIR, 'site.crt'), os.path.join(OUT_DIR, 'site.key'), os.path.join(OUT_DIR, 'ca-chain.crt'))
+for f in required_files:
+	if ( os.path.exists(f)):
+		some_exist = True
+	else:
+		missing.append(f)
 
-if flavor is not None:
-  	# Generate the root CA
-  	# Set the root CA as the signing entity
-	print "Generate root CA"
-	run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_ROOT_KEYTYPE,keysize=KEY_SIZE))
-	run(CA_ROOT_SIGN_FORMAT.format(host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF ))
-
-	key=CA_ROOT_KEYTYPE
-	cas = [key]
-
-  	if flavor == 'multi':
-		# Generate the intermediate CA, signed by root CA
-		# Set intermediate CA as the signing entity
-		print "Generate multi-layer CA"
-		run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_WEB_KEYTYPE, keysize=KEY_SIZE, openssl_cnf=OPENSSL_CONF ))
-		run(CSR_FORMAT.format(days=1000,host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_WEB_KEYTYPE, subject=WEB_SUBJECT.format(host=host)))
-		run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=CA_ROOT_KEYTYPE,keytype=CA_WEB_KEYTYPE,ext=EXT_CA))
-		cat_keycert(CA_WEB_KEYTYPE)
-
-		key=CA_WEB_KEYTYPE
-		cas.append(key)
-
-	print "Generate site certificate"
-	run(SITE_CSR_FORMAT.format(host=host, ip_address=ip_address,keysize=KEY_SIZE, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
+if some_exist is False:
+	print "Setting up SSL according to environment settings: flavor=%s, host=%s" % (flavor, host)
+	setup_ssl()
 	
-	print "Sign site certificate with CA: %s" % key
-	run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_SITE_KEYTYPE,ext=EXT_NONE))
+elif len(missing) > 0:
+	print """
+ERROR: It looks like you tried to mount a pre-existing SSL key/certificate set, but the files you provided were incomplete.
 
-	print "Generate client key/certificate"
-	run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_CLIENT_KEYTYPE, keysize=KEY_SIZE, openssl_cnf=OPENSSL_CONF ))
-	run(CSR_FORMAT.format(days=365,host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_CLIENT_KEYTYPE, subject=CLIENT_SUBJECT.format(host=host)))
-	run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_CLIENT_KEYTYPE,ext=EXT_NONE))
-	# cat_keycert(CA_CLIENT_KEYTYPE)
-	run(P12_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_CLIENT_KEYTYPE))
-	run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
+The following files are missing:
 
-	with open(os.path.join(OUT_DIR, 'ca-chain.crt'), 'w') as outfile:
-		for ca in reversed(cas):
-			with open(os.path.join(OUT_DIR, "%s.crt" % ca), 'r') as infile:
-				outfile.write(infile.read())
+  %s
 
-else:
-	# Generate a self-signed certificate without a CA
-	print "Generate self-signed certificate"
-	run(SITE_SELFSIGN_FORMAT.format(host=host, ip_address=ip_address,keysize=KEY_SIZE, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
+""" % "\n  ".join(missing)
+	sys.exit(127)
 
-	with open(os.path.join(OUT_DIR, 'ca-chain.crt'), 'w') as outfile:
-		with open(os.path.join(OUT_DIR, 'site.crt'), 'r') as infile:
-			outfile.write(infile.read())
 
-	#### This seems like it won't work without a lot of hacks on the server side, so let's just disable it for now.
-	# print "Generate self-signed client key/certificate"
-	# run(CLIENT_SELFSIGN_FORMAT.format(host=host,ip_address=ip_address,dir=OUT_DIR,openssl_cnf=OPENSSL_CONF))
-	# run(P12_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
-	# run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
-
+print "Starting HTTPd"
 run("httpd -D FOREGROUND")
