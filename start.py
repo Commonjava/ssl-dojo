@@ -23,8 +23,13 @@ import fcntl
 import struct
 import time
 
-OUT_DIR='/var/www/html/ssl-config'
-OSSL_DIR=os.path.join(OUT_DIR, 'openssl-files')
+CGI_TMP_DIR='/tmp/cgi-bin'
+SSL_TMP_DIR='/tmp/ssl-config'
+
+CGI_OUT_DIR='/var/www/cgi-bin'
+SSL_OUT_DIR='/var/www/html/ssl-config'
+
+OSSL_DIR=os.path.join(SSL_OUT_DIR, 'openssl-files')
 
 EXT_CA="-extensions v3_ca"
 EXT_NONE=""
@@ -127,9 +132,9 @@ HTTPD_CONF='/etc/httpd/conf/httpd.conf'
 SSL_CONF='/etc/httpd/conf.d/ssl.conf'
 
 def cat_keycert(basename):
-	with open(os.path.join(OUT_DIR, "%s.pem" % basename), 'w') as outfile:
-		for fname in (os.path.join(OUT_DIR, "%s.crt" % basename), 
-					  os.path.join(OUT_DIR, "%s.key" % basename)):
+	with open(os.path.join(SSL_OUT_DIR, "%s.pem" % basename), 'w') as outfile:
+		for fname in (os.path.join(SSL_OUT_DIR, "%s.crt" % basename), 
+					  os.path.join(SSL_OUT_DIR, "%s.key" % basename)):
 			with open(fname,'r') as infile:
 				outfile.write(infile.read())
 
@@ -137,7 +142,7 @@ def create_conf(conf_file, host, subjectAltNames=None):
 	infile = "%s.in" % conf_file
 	if os.path.exists(infile):
 		with open(infile, 'r') as fi:
-			output = fi.read().replace('{{host}}', host).replace('{{dir}}', OUT_DIR).replace('{{openssl_dir}}', OSSL_DIR).replace('{{keysize}}', KEY_SIZE)
+			output = fi.read().replace('{{host}}', host).replace('{{dir}}', SSL_OUT_DIR).replace('{{openssl_dir}}', OSSL_DIR).replace('{{keysize}}', KEY_SIZE)
 			if subjectAltNames is not None:
 				output = output.replace('{{subjectAltNames}}', subjectAltNames)
 			with open(conf_file, 'w') as fo:
@@ -181,8 +186,8 @@ def setup_ssl():
 	  	# Generate the root CA
 	  	# Set the root CA as the signing entity
 		print "Generate root CA"
-		run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_ROOT_KEYTYPE,keysize=KEY_SIZE))
-		run(CA_ROOT_SIGN_FORMAT.format(host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF ))
+		run(KEY_FORMAT.format(dir=SSL_OUT_DIR, keytype=CA_ROOT_KEYTYPE,keysize=KEY_SIZE))
+		run(CA_ROOT_SIGN_FORMAT.format(host=host, dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF ))
 
 		key=CA_ROOT_KEYTYPE
 		cas = [key]
@@ -191,47 +196,49 @@ def setup_ssl():
 			# Generate the intermediate CA, signed by root CA
 			# Set intermediate CA as the signing entity
 			print "Generate multi-layer CA"
-			run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_WEB_KEYTYPE, keysize=KEY_SIZE, openssl_cnf=OPENSSL_CONF ))
-			run(CSR_FORMAT.format(days=1000,host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_WEB_KEYTYPE, subject=WEB_SUBJECT.format(host=host)))
-			run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=CA_ROOT_KEYTYPE,keytype=CA_WEB_KEYTYPE,ext=EXT_CA))
+			run(KEY_FORMAT.format(dir=SSL_OUT_DIR, keytype=CA_WEB_KEYTYPE, keysize=KEY_SIZE, openssl_cnf=OPENSSL_CONF ))
+			run(CSR_FORMAT.format(days=1000,host=host, dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_WEB_KEYTYPE, subject=WEB_SUBJECT.format(host=host)))
+			run(SIGN_FORMAT.format(dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=CA_ROOT_KEYTYPE,keytype=CA_WEB_KEYTYPE,ext=EXT_CA))
 			cat_keycert(CA_WEB_KEYTYPE)
 
 			key=CA_WEB_KEYTYPE
 			cas.append(key)
 
 		print "Generate site certificate"
-		run(SITE_CSR_FORMAT.format(host=host, ip_address=ip_address,keysize=KEY_SIZE, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
+		run(SITE_CSR_FORMAT.format(host=host, ip_address=ip_address,keysize=KEY_SIZE, dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF))
 		
 		print "Sign site certificate with CA: %s" % key
-		run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_SITE_KEYTYPE,ext=EXT_NONE))
+		run(SIGN_FORMAT.format(dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_SITE_KEYTYPE,ext=EXT_NONE))
 
 		print "Generate client key/certificate"
-		run(KEY_FORMAT.format(dir=OUT_DIR, keytype=CA_CLIENT_KEYTYPE, keysize=KEY_SIZE, openssl_cnf=OPENSSL_CONF ))
-		run(CSR_FORMAT.format(days=365,host=host, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_CLIENT_KEYTYPE, subject=CLIENT_SUBJECT.format(host=host)))
-		run(SIGN_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_CLIENT_KEYTYPE,ext=EXT_NONE))
+		run(KEY_FORMAT.format(dir=SSL_OUT_DIR, keytype=CA_CLIENT_KEYTYPE, keysize=KEY_SIZE, openssl_cnf=OPENSSL_CONF ))
+		run(CSR_FORMAT.format(days=365,host=host, dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_CLIENT_KEYTYPE, subject=CLIENT_SUBJECT.format(host=host)))
+		run(SIGN_FORMAT.format(dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_CLIENT_KEYTYPE,ext=EXT_NONE))
 		# cat_keycert(CA_CLIENT_KEYTYPE)
-		run(P12_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_CLIENT_KEYTYPE))
-		run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
+		run(P12_FORMAT.format(dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=key,keytype=CA_CLIENT_KEYTYPE))
+		run(PEM_FORMAT.format(dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
 
-		with open(os.path.join(OUT_DIR, 'ca-chain.crt'), 'w') as outfile:
+		with open(os.path.join(SSL_OUT_DIR, 'ca-chain.crt'), 'w') as outfile:
 			for ca in reversed(cas):
-				with open(os.path.join(OUT_DIR, "%s.crt" % ca), 'r') as infile:
+				with open(os.path.join(SSL_OUT_DIR, "%s.crt" % ca), 'r') as infile:
 					outfile.write(infile.read())
 
 	else:
 		# Generate a self-signed certificate without a CA
 		print "Generate self-signed certificate"
-		run(SITE_SELFSIGN_FORMAT.format(host=host, ip_address=ip_address,keysize=KEY_SIZE, dir=OUT_DIR, openssl_cnf=OPENSSL_CONF))
+		run(SITE_SELFSIGN_FORMAT.format(host=host, ip_address=ip_address,keysize=KEY_SIZE, dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF))
 
-		with open(os.path.join(OUT_DIR, 'ca-chain.crt'), 'w') as outfile:
-			with open(os.path.join(OUT_DIR, 'site.crt'), 'r') as infile:
+		with open(os.path.join(SSL_OUT_DIR, 'ca-chain.crt'), 'w') as outfile:
+			with open(os.path.join(SSL_OUT_DIR, 'site.crt'), 'r') as infile:
 				outfile.write(infile.read())
 
-		#### This seems like it won't work without a lot of hacks on the server side, so let's just disable it for now.
-		# print "Generate self-signed client key/certificate"
-		# run(CLIENT_SELFSIGN_FORMAT.format(host=host,ip_address=ip_address,dir=OUT_DIR,openssl_cnf=OPENSSL_CONF))
-		# run(P12_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
-		# run(PEM_FORMAT.format(dir=OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
+        # This will create a client key/cert signed by the self-signed certificate used on the server. A bit hackish, but I think it should work...
+		run(KEY_FORMAT.format(dir=SSL_OUT_DIR, keytype=CA_CLIENT_KEYTYPE, keysize=KEY_SIZE, openssl_cnf=OPENSSL_CONF ))
+		run(CSR_FORMAT.format(days=365,host=host, dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF, keytype=CA_CLIENT_KEYTYPE, subject=CLIENT_SUBJECT.format(host=host)))
+		run(SIGN_FORMAT.format(dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=CA_SITE_KEYTYPE,keytype=CA_CLIENT_KEYTYPE,ext=EXT_NONE))
+		# cat_keycert(CA_CLIENT_KEYTYPE)
+		run(P12_FORMAT.format(dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF,catype=CA_SITE_KEYTYPE,keytype=CA_CLIENT_KEYTYPE))
+		run(PEM_FORMAT.format(dir=SSL_OUT_DIR, openssl_cnf=OPENSSL_CONF,keytype=CA_CLIENT_KEYTYPE))
 
 
 flavor=os.environ.get(CA_TYPE_ENVAR) or None
@@ -251,12 +258,19 @@ create_conf(SSL_CONF, host)
 some_exist = False
 missing = []
 
-required_files = (os.path.join(OUT_DIR, 'site.crt'), os.path.join(OUT_DIR, 'site.key'), os.path.join(OUT_DIR, 'ca-chain.crt'))
-for f in required_files:
-	if ( os.path.exists(f)):
-		some_exist = True
-	else:
-		missing.append(f)
+if os.path.exists(SSL_TMP_DIR):
+	required_files = ('site.crt', 'site.key', 'ca-chain.crt')
+	for f in required_files:
+		src = os.path.join(SSL_TMP_DIR, f)
+		target = os.path.join(SSL_OUT_DIR, f)
+		if ( os.path.exists(src)):
+			with open(src, 'r') as infile:
+				with open(target, 'w') as outfile:
+					outfile.write(infile.read())
+
+			some_exist = True
+		else:
+			missing.append(src)
 
 if some_exist is False:
 	print "Setting up SSL according to environment settings: flavor=%s, host=%s" % (flavor, host)
